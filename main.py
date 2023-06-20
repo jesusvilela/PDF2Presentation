@@ -50,7 +50,7 @@ def structure_text(pages):
 
 def generate_summary(section):
     response = openai.Completion.create(
-        engine="text-davinci-003",
+        engine="gpt-3.5-turbo",
         prompt=section,
         temperature=0.3,
         max_tokens=60
