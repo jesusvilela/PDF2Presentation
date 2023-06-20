@@ -50,7 +50,7 @@ def structure_text(pages):
 
 def generate_summary(section):
     response = openai.Completion.create(
-        engine="gpt-3.5-turbo",
+        engine="text-davinci-003",
         prompt=section,
         temperature=0.3,
         max_tokens=60
@@ -133,19 +133,28 @@ def create_presentation(titles, contents, images, image_indices, cover_image_pat
     presentation.save("my_presentation.pptx")
     return presentation
 
+
 def main():
     file_path = "document.pdf"
     pages = extract_text_from_pdf(file_path)
     images, image_indices = extract_images_from_pdf(file_path)
     sections = structure_text(pages)
-    summaries = [generate_summary(page) for page in sections]
+
+    # Process summaries one by one
+    summaries = []
+    for page in sections:
+        summary = generate_summary(page)
+        summaries.append(summary)
+
     titles = [generate_title(page, summary) for page, summary in zip(sections, summaries)]
     cover_image_path = generate_cover(titles[0])
     presentation = create_presentation(titles, sections, images, image_indices, cover_image_path)
+
     # Adding the cover image
     with open(cover_image_path, "rb") as img_file:
         cover_image_data = img_file.read()
     add_image_to_slide(presentation.slides[0], cover_image_data)
+
 
 if __name__ == "__main__":
     main()
