@@ -1,0 +1,5 @@
+pypdf2~=2.10.5
+openai~=0.27.4
+diffusers~=0.17.1
+nltk~=3.8.1
+pillow~=9.4.0
