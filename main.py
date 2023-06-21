@@ -15,7 +15,8 @@ import os
 nltk.download('punkt')
 
 openai.api_key = "your_openai_key"
-
+total_tokens = 0  # Initialize total tokens
+TOKEN_COST = 0.00003  # Cost per token /1000 tokens
 
 def extract_text_from_pdf(file_path):
     with open(file_path, "rb") as file:
@@ -25,7 +26,6 @@ def extract_text_from_pdf(file_path):
             text.append(reader.getPage(page).extract_text())
     return text
 
-
 def extract_images_from_pdf(file_path):
     doc = fitz.open(file_path)
     images = []
@@ -34,10 +34,13 @@ def extract_images_from_pdf(file_path):
         for img in doc.get_page_images(i):
             xref = img[0]
             img_data = doc.extract_image(xref)
-            images.append(img_data['image'])
+            image = Image.open(BytesIO(img_data['image']))
+            # Convert image to PNG
+            png_image = BytesIO()
+            image.save(png_image, format='PNG')
+            images.append(png_image.getvalue())
             image_indices.append(i)
     return images, image_indices
-
 
 def structure_text(pages):
     sections = []
@@ -48,13 +51,18 @@ def structure_text(pages):
     return sections
 
 
+# When you make a completion request, capture the 'usage' data
 def generate_summary(section):
+    global total_tokens
     response = openai.Completion.create(
         engine="text-davinci-003",
         prompt=section,
         temperature=0.3,
         max_tokens=60
     )
+    # Add the number of tokens used in this API call to the total
+    total_tokens += response['usage']['total_tokens']
+
     summary = response.choices[0].text.strip()
     summary = re.sub('[^a-zA-Z0-9 \n\.]', '', summary)
     return summary
@@ -157,6 +165,9 @@ def main():
     with open(cover_image_path, "rb") as img_file:
         cover_image_data = img_file.read()
     add_image_to_slide(presentation.slides[0], cover_image_data)
+    # Print out the total number of tokens used and the estimated cost
+    print(f"Total tokens used: {total_tokens}")
+    print(f"Estimated cost: ${total_tokens * TOKEN_COST}")
 
 
 if __name__ == "__main__":
