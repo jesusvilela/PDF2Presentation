@@ -14,7 +14,7 @@ import os
 
 nltk.download('punkt')
 
-openai.api_key = "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"
+openai.api_key = "your_openai_key"
 
 
 def extract_text_from_pdf(file_path):
