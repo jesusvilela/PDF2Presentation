@@ -14,7 +14,7 @@ import os
 
 nltk.download('punkt')
 
-openai.api_key = "your_openai_key"
+openai.api_key = "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"
 
 
 def extract_text_from_pdf(file_path):
@@ -138,17 +138,20 @@ def main():
     file_path = "document.pdf"
     pages = extract_text_from_pdf(file_path)
     images, image_indices = extract_images_from_pdf(file_path)
-    sections = structure_text(pages)
 
-    # Process summaries one by one
-    summaries = []
-    for page in sections:
-        summary = generate_summary(page)
-        summaries.append(summary)
+    full_text = "\n".join([page for page in pages])
+    summary = generate_summary(full_text)
+    title = generate_title(full_text, summary)
 
-    titles = [generate_title(page, summary) for page, summary in zip(sections, summaries)]
-    cover_image_path = generate_cover(titles[0])
-    presentation = create_presentation(titles, sections, images, image_indices, cover_image_path)
+    cover_image_path = generate_cover(title)
+
+    # Assuming every slide will use the same title for simplicity
+    titles = [title for _ in range(len(pages))]
+
+    # Assuming every slide will use the same content for simplicity
+    contents = [summary for _ in range(len(pages))]
+
+    presentation = create_presentation(titles, contents, images, image_indices, cover_image_path)
 
     # Adding the cover image
     with open(cover_image_path, "rb") as img_file:
@@ -158,4 +161,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
