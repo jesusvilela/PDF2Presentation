@@ -4,19 +4,27 @@ import fitz
 import openai
 import torch
 import re
+import spacy
 from pptx import Presentation
 from pptx.util import Inches
-from diffusers import StableDiffusionPipeline, EulerDiscreteScheduler
+from transformers import T5Tokenizer, T5ForConditionalGeneration
+from collections import Counter
 from io import BytesIO
 from PIL import Image
 import os
-
+from diffusers import StableDiffusionPipeline, EulerDiscreteScheduler
+import time
 
 nltk.download('punkt')
+openai.api_key = "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"#"your_openai_key
+nlp = spacy.load('en_core_web_sm') #python -m spacy download en_core_web_sm
+#record start time
+start_time = time.time()
 
-openai.api_key = "your_openai_key"
-total_tokens = 0  # Initialize total tokens
-TOKEN_COST = 0.00003  # Cost per token /1000 tokens
+def preprocess_text(text):
+    doc = nlp(text)
+    cleaned_text = " ".join(token.lemma_ for token in doc if not token.is_stop)
+    return cleaned_text
 
 def extract_text_from_pdf(file_path):
     with open(file_path, "rb") as file:
@@ -42,43 +50,21 @@ def extract_images_from_pdf(file_path):
             image_indices.append(i)
     return images, image_indices
 
-def structure_text(pages):
-    sections = []
-    for page in pages:
-        page = page.replace('\n', ' ').replace('....', '.')
-        page = re.sub(' +', ' ', page)
-        sections.append([section.strip() for section in page.split(":")])
-    return sections
-
-
-# When you make a completion request, capture the 'usage' data
 def generate_summary(section):
-    global total_tokens
-    response = openai.Completion.create(
-        engine="text-davinci-003",
-        prompt=section,
-        temperature=0.3,
-        max_tokens=60
-    )
-    # Add the number of tokens used in this API call to the total
-    total_tokens += response['usage']['total_tokens']
+    model = T5ForConditionalGeneration.from_pretrained('t5-base')
+    tokenizer = T5Tokenizer.from_pretrained('t5-base')#pip install sentencepiece
+    inputs = tokenizer.encode("summarize: " + section, return_tensors="pt", max_length=512)
+    outputs = model.generate(inputs, max_length=150, min_length=40, length_penalty=2.0, num_beams=4, early_stopping=True)
+    return tokenizer.decode(outputs[0])
 
-    summary = response.choices[0].text.strip()
-    summary = re.sub('[^a-zA-Z0-9 \n\.]', '', summary)
-    return summary
-
+def extract_key_phrases(text):
+    doc = nlp(text)
+    return [chunk.text for chunk in doc.noun_chunks]
 
 def generate_title(section, summary):
-    prompt = section[0].split(".")[0] + " " + summary
-    response = openai.Completion.create(
-        engine="text-davinci-003",
-        prompt=prompt,
-        temperature=0.3,
-        max_tokens=10
-    )
-    return response.choices[0].text.strip()
-
-
+    key_phrases = extract_key_phrases(summary)
+    title = ' '.join(key_phrases[:3])  # Use the first 3 key phrases to generate the title
+    return title
 def generate_cover(title):
     model_id = "stabilityai/stable-diffusion-2-1-base"
     scheduler = EulerDiscreteScheduler.from_pretrained(model_id, subfolder="scheduler")
@@ -90,6 +76,28 @@ def generate_cover(title):
     image_path = f"{title.replace(' ', '_')}_cover.png"
     image.save(image_path)
     return image_path
+def generate_presenter_notes(content):
+    prompt = f"As a speaker, how would you explain this content:\n\n{content}\n\nSpeaker:"
+    response = openai.Completion.create(
+        engine="text-davinci-003",
+        prompt=prompt,
+        temperature=0.3,
+        max_tokens=120
+    )
+    notes = response.choices[0].text.strip()
+    notes = re.sub('[^a-zA-Z0-9 \n\.]', '', notes) # Remove special characters
+    global total_tokens  # Access the global variable
+    total_tokens += len(tokenizer.encode(notes))  # Update total tokens with the count of tokens in the API response
+    return notes
+
+def select_image(content, images):
+    doc = nlp(content)
+    words = [token.text for token in doc if token.pos_ == 'NOUN']
+    most_common_noun = Counter(words).most_common(1)[0][0]
+    for image, image_text in images.items():
+        if most_common_noun in image_text:
+            return image
+    return None
 
 def add_image_to_slide(slide, image_data_or_path):
     if isinstance(image_data_or_path, bytes):
@@ -99,24 +107,12 @@ def add_image_to_slide(slide, image_data_or_path):
             image_data = f.read()
         img_stream = BytesIO(image_data)
     slide.shapes.add_picture(img_stream, Inches(2), Inches(2), height=Inches(5))
-
-
 def add_bullet_points_to_slide(slide, points):
-    bullet_slide = slide.shapes
+    bullet_slide = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(6), Inches(6)).text_frame
     for point in points:
-        bullet_slide.text = point
-
-def generate_presenter_notes(content):
-    response = openai.Completion.create(
-        engine="text-davinci-003",
-        prompt=content,
-        temperature=0.3,
-        max_tokens=60
-    )
-    notes = response.choices[0].text.strip()
-    notes = re.sub('[^a-zA-Z0-9 \n\.]', '', notes)
-    return notes
-
+        p = bullet_slide.add_paragraph()
+        p.text = point
+        p.level = 0
 
 def create_presentation(titles, contents, images, image_indices, cover_image_path):
     presentation = Presentation()
@@ -127,48 +123,43 @@ def create_presentation(titles, contents, images, image_indices, cover_image_pat
     # Adding the cover image
     add_image_to_slide(presentation.slides[0], cover_image_path)
 
-    for i, (title_text, content) in enumerate(zip(titles, contents)):
+    # Verify the length of titles and contents
+    assert len(titles) == len(contents), "Mismatch between titles and contents length"
+
+    for i in range(len(titles)):  # Iterate over the length of the titles/contents
         slide_layout = presentation.slide_layouts[1]
         slide = presentation.slides.add_slide(slide_layout)
         title = slide.shapes.title
-        title.text = title_text
-        add_bullet_points_to_slide(slide, content)
+        title.text = titles[i]
+        add_bullet_points_to_slide(slide, contents[i])
         if i in image_indices:
             add_image_to_slide(slide, images[image_indices.index(i)])
         notes_slide = slide.notes_slide
         text_frame = notes_slide.notes_text_frame
-        text_frame.text = generate_presenter_notes(content)
+        text_frame.text = generate_presenter_notes(contents[i])
     presentation.save("my_presentation.pptx")
     return presentation
 
-
 def main():
     file_path = "document.pdf"
-    pages = extract_text_from_pdf(file_path)
+    pages = extract_text_from_pdf(file_path)  # Extract text from the pdf
     images, image_indices = extract_images_from_pdf(file_path)
 
-    full_text = "\n".join([page for page in pages])
-    summary = generate_summary(full_text)
-    title = generate_title(full_text, summary)
+    titles = []
+    contents = []
 
-    cover_image_path = generate_cover(title)
+    for page in pages:
+        cleaned_page = preprocess_text(page)
+        summary = generate_summary(cleaned_page)
+        title = generate_title(cleaned_page, summary)
+        titles.append(title)
+        contents.append(summary)
 
-    # Assuming every slide will use the same title for simplicity
-    titles = [title for _ in range(len(pages))]
-
-    # Assuming every slide will use the same content for simplicity
-    contents = [summary for _ in range(len(pages))]
+    cover_image_path = generate_cover(titles[0])  # Generate cover using the title of the first slide
 
     presentation = create_presentation(titles, contents, images, image_indices, cover_image_path)
 
-    # Adding the cover image
-    with open(cover_image_path, "rb") as img_file:
-        cover_image_data = img_file.read()
-    add_image_to_slide(presentation.slides[0], cover_image_data)
-    # Print out the total number of tokens used and the estimated cost
-    print(f"Total tokens used: {total_tokens}")
-    print(f"Estimated cost: ${total_tokens * TOKEN_COST}")
-
+    print(f"Task completed in {round(time.time() - start_time, 2)/60} minutes")
 
 if __name__ == "__main__":
     main()
