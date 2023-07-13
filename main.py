@@ -16,7 +16,7 @@ from diffusers import StableDiffusionPipeline, EulerDiscreteScheduler
 import time
 
 nltk.download('punkt')
-openai.api_key = "your_openai_key"#"your_openai_key
+openai.api_key = "your_openai_key"
 nlp = spacy.load('en_core_web_sm') #python -m spacy download en_core_web_sm
 #record start time
 start_time = time.time()
@@ -78,16 +78,15 @@ def generate_cover(title):
     return image_path
 def generate_presenter_notes(content):
     prompt = f"As a speaker, how would you explain this content:\n\n{content}\n\nSpeaker:"
-    response = openai.Completion.create(
-        engine="text-davinci-003",
-        prompt=prompt,
-        temperature=0.3,
-        max_tokens=120
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": prompt}
+        ]
     )
-    notes = response.choices[0].text.strip()
+    notes = response.choices[0].message['content'].strip()
     notes = re.sub('[^a-zA-Z0-9 \n\.]', '', notes) # Remove special characters
-    global total_tokens  # Access the global variable
-    total_tokens += len(tokenizer.encode(notes))  # Update total tokens with the count of tokens in the API response
     return notes
 
 def select_image(content, images):
@@ -114,6 +113,26 @@ def add_bullet_points_to_slide(slide, points):
         p.text = point
         p.level = 0
 
+def save_summary_to_txt_file(summary, filename):
+    with open(filename, 'w') as f:
+        f.write(summary)
+
+def read_text_from_file(filename):
+    with open(filename, 'r') as f:
+        return f.read()
+
+def correct_summary_with_gpt4(summary):
+    prompt = f"This is a draft summary, please help correct and improve it:\n\n{summary}\n\nEditor:"
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are a helpful editor."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+    corrected_summary = response.choices[0].message['content'].strip()
+    corrected_summary = re.sub('[^a-zA-Z0-9 \n\.]', '', corrected_summary) # Remove special characters
+    return corrected_summary
 def create_presentation(titles, contents, images, image_indices, cover_image_path):
     presentation = Presentation()
     slide_layout = presentation.slide_layouts[0]
@@ -140,6 +159,7 @@ def create_presentation(titles, contents, images, image_indices, cover_image_pat
     presentation.save("my_presentation.pptx")
     return presentation
 
+
 def main():
     file_path = "document.pdf"
     pages = extract_text_from_pdf(file_path)  # Extract text from the pdf
@@ -148,18 +168,29 @@ def main():
     titles = []
     contents = []
 
-    for page in pages:
+    for i, page in enumerate(pages):
         cleaned_page = preprocess_text(page)
         summary = generate_summary(cleaned_page)
-        title = generate_title(cleaned_page, summary)
+
+        # Save the summary to a .txt file
+        save_summary_to_txt_file(summary, f"summary_{i}.txt")
+
+        # Read the summary from the .txt file
+        summary = read_text_from_file(f"summary_{i}.txt")
+
+        # Correct the summary with GPT-4
+        corrected_summary = correct_summary_with_gpt4(summary)
+
+        title = generate_title(cleaned_page, corrected_summary)
         titles.append(title)
-        contents.append(summary)
+        contents.append(corrected_summary)
 
     cover_image_path = generate_cover(titles[0])  # Generate cover using the title of the first slide
 
     presentation = create_presentation(titles, contents, images, image_indices, cover_image_path)
 
-    print(f"Task completed in {round(time.time() - start_time, 2)/60} minutes")
+    print(f"Task completed in {round(time.time() - start_time, 2) / 60} minutes")
+
 
 if __name__ == "__main__":
     main()

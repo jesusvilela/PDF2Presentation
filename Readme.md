@@ -53,6 +53,12 @@ Enjoy transforming your PDFs into impressive presentations!
 
 The changelog contains a record of all notable changes made to PDF2Presentation. These include new features, bug fixes, and other improvements. 
 
+### [0.0.3] - 2023-07-13
+#### Added
+- **Improved Text Corrections**: The project has now migrated to use OpenAI's ChatGPT-4 completions API. This results in more accurate and contextually aware corrections.
+- **Double Validation Run**: To minimize errors, we've implemented a second validation run that helps correct potential typos.
+- **Summary Storage**: To facilitate manual review and editing, the code now saves each generated summary in a .TXT file.
+
 ## [0.0.2] - 2023-06-29
 
 ### Added
